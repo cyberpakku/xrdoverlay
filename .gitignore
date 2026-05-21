@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Internal review notes + planning (kept locally only)
+PLAN.md
+corrections.md
+corrections-v*.md
