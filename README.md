@@ -13,7 +13,7 @@ Works offline after first load (PWA).
 1. Open the URL on your phone or laptop.
 2. Pick a reference standard from the dropdown.
 3. Click **Choose file** or drag your XRD scan onto the drop zone.
-   - Supported formats: `.ASC`, `.txt`, `.xy`, `.csv` (auto-detects delimiter and skips the Rigaku error column).
+   - Supported formats: `.ASC`, `.txt`, `.xy`, `.csv` (auto-detects delimiter and skips the Rigaku error column), and `.rasx` (Rigaku SmartLab archive — unpacked in the browser; no other app needed).
    - Or click **Load demo** to see the tool work with a sample experimental file.
 4. Compare. Use the **2θ shift** slider to align peaks if your sample is uniformly offset.
 5. Optional: enable **Background subtraction**, switch **Y scale** to log, zoom into a 2θ range, or save a PNG.

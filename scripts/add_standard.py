@@ -281,15 +281,24 @@ def upsert_entry(manifest: dict, entry: dict) -> str:
 
 
 def bump_sw_cache_version() -> tuple[str, str]:
-    """Increment the trailing integer in CACHE = 'xrdoverlay-vN'. Returns (old, new)."""
+    """Bump the PATCH component of CACHE = 'xrdoverlay-vMAJOR.MINOR.PATCH'.
+
+    Adding a standard is an asset-only change, so it never touches MAJOR or
+    MINOR. Bump those by hand in service-worker.js when a real feature ships
+    (MINOR) or a redesign happens (MAJOR). Also keep index.html's
+    <span id="version"> in sync when MAJOR/MINOR change.
+    """
     text = SERVICE_WORKER.read_text()
-    m = re.search(r"const\s+CACHE\s*=\s*'(xrdoverlay-v(\d+))'", text)
+    m = re.search(
+        r"const\s+CACHE\s*=\s*'(xrdoverlay-v(\d+)\.(\d+)\.(\d+))'", text
+    )
     if not m:
         raise RuntimeError(
-            f"Could not find CACHE constant in {SERVICE_WORKER}"
+            f"Could not find a semver CACHE constant (xrdoverlay-vMAJOR.MINOR.PATCH) "
+            f"in {SERVICE_WORKER}"
         )
-    old_name, n_str = m.group(1), m.group(2)
-    new_name = f"xrdoverlay-v{int(n_str) + 1}"
+    old_name, major, minor, patch = m.group(1), m.group(2), m.group(3), m.group(4)
+    new_name = f"xrdoverlay-v{major}.{minor}.{int(patch) + 1}"
     new_text = text.replace(f"'{old_name}'", f"'{new_name}'", 1)
     SERVICE_WORKER.write_text(new_text)
     return old_name, new_name

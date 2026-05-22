@@ -237,13 +237,14 @@
       <span class="section-label">Experimental data</span>
       <div class="drop-zone" id="drop">
         <div><b>Drop XRD file</b> here</div>
-        <div class="hint">.ASC / .txt / .xy / .csv  —  or tap below</div>
+        <div class="hint">.ASC / .txt / .xy / .csv / .rasx  —  or tap below</div>
         <button id="file-btn" class="secondary" style="margin-top: 8px;">Choose file</button>
         <button id="demo-btn" class="secondary" style="margin-top: 8px;">Load demo</button>
         <input type="file" id="file-input" style="display:none"
-               accept=".ASC,.asc,.txt,.xy,.csv,.dat">
+               accept=".ASC,.asc,.txt,.xy,.csv,.dat,.rasx">
       </div>
       <div id="exp-msg" class="msg info" style="display: none;"></div>
+      <div id="exp-meta" class="msg info" style="display: none;"></div>
     </div>
 
     <!-- 2θ shift -->
@@ -311,7 +312,7 @@
 
     <!-- Footer with status + cache reset -->
     <div class="footer">
-      <span id="version" title="xrdoverlay version">v1</span>
+      <span id="version" title="xrdoverlay version">v1.1.0</span>
       <div class="small-actions">
         <button id="theme-toggle" class="secondary" title="Toggle theme">🌙</button>
         <button id="clear-cache" class="secondary" title="Clear offline cache">↻ cache</button>
@@ -328,6 +329,7 @@
 </div>
 
 <script src="plotly.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
 <script>
 'use strict';
 
@@ -413,6 +415,83 @@ function parseXRD(text) {
     return { x: [], y: [], error: `Couldn't find numeric 2-column data (only ${x.length} valid rows). Expected: 2θ and intensity columns, comma- / tab- / or space-separated.` };
   }
   return { x, y };
+}
+
+// ============================================================
+// RASX (Rigaku SmartLab archive) ingestion — see PLAN.md §H
+// ============================================================
+function stripBom(s) {
+  return s && s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s;
+}
+
+function parseRasxMeta(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const t = tag => {
+    const el = doc.getElementsByTagName(tag)[0];
+    return el && el.textContent ? el.textContent.trim() : null;
+  };
+  const n = tag => {
+    const v = t(tag);
+    if (v === null || v === '') return null;
+    const num = Number(v);
+    return Number.isFinite(num) ? num : null;
+  };
+  return {
+    systemName:    t('SystemName'),
+    operator:      t('Operator'),
+    sampleName:    t('SampleName'),
+    target:        t('TargetName'),
+    wavelengthKa1: n('WavelengthKalpha1'),
+    wavelengthKa2: n('WavelengthKalpha2'),
+    start:         n('Start'),
+    stop:          n('Stop'),
+    step:          n('Step'),
+    speed:         n('Speed'),
+    speedUnit:     t('SpeedUnit'),
+    startTime:     t('StartTime'),
+  };
+}
+
+function formatRasxMeta(meta) {
+  if (!meta) return '';
+  const parts = [];
+  if (meta.systemName) parts.push(meta.systemName);
+  if (meta.target)     parts.push(`${meta.target} Kα`);
+  if (meta.start != null && meta.stop != null && meta.step != null) {
+    parts.push(`${meta.start}–${meta.stop}° @ ${meta.step}°`);
+  }
+  if (meta.speed != null) {
+    parts.push(`${meta.speed}${meta.speedUnit ? ' ' + meta.speedUnit : ''}`);
+  }
+  if (meta.startTime) {
+    const d = meta.startTime.split('T')[0];   // YYYY-MM-DD
+    if (d) parts.push(d);
+  }
+  return parts.join(' · ');
+}
+
+async function unpackRasx(arrayBuffer) {
+  if (typeof JSZip === 'undefined') {
+    throw new Error('JSZip not loaded — RASX support unavailable.');
+  }
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const profile = zip.file('Data0/Profile0.txt');
+  if (!profile) {
+    throw new Error('Not a SmartLab RASX: missing Data0/Profile0.txt.');
+  }
+  const text = stripBom(await profile.async('string'));
+  // Rigaku spelling: "Mesurement" (sic), missing an 'a'. Same across SmartLab versions.
+  const condFile = zip.file('Data0/MesurementConditions0.xml');
+  const meta = condFile
+    ? parseRasxMeta(stripBom(await condFile.async('string')))
+    : {};
+  return { text, meta };
+}
+
+function isZipMagic(arrayBuffer) {
+  if (!arrayBuffer || arrayBuffer.byteLength < 4) return false;
+  const b = new Uint8Array(arrayBuffer, 0, 4);
+  return b[0] === 0x50 && b[1] === 0x4B && b[2] === 0x03 && b[3] === 0x04;
 }
 
 // ============================================================
@@ -757,7 +836,8 @@ function rebuildStdSelect() {
 // ============================================================
 // File loading (file pick + drag-drop + demo)
 // ============================================================
-function loadFromText(text, filename) {
+function loadFromText(text, filename, options) {
+  const opts = options || {};
   const parsed = parseXRD(text);
   if (parsed.error) {
     showMsg('exp-msg', 'err', `${filename}: ${parsed.error}`);
@@ -766,16 +846,53 @@ function loadFromText(text, filename) {
   state.expRaw = { x: parsed.x, y: parsed.y, filename };
   const xMin = parsed.x[0], xMax = parsed.x[parsed.x.length - 1];
   const step = (xMax - xMin) / (parsed.x.length - 1);
+  const displayName = opts.displayName || filename;
   showMsg('exp-msg', 'ok',
-    `Loaded ${parsed.x.length} points from ${filename}, ${xMin.toFixed(2)}–${xMax.toFixed(2)}° (step ≈ ${step.toFixed(3)}°).`);
+    `Loaded ${parsed.x.length} points from ${displayName}, ${xMin.toFixed(2)}–${xMax.toFixed(2)}° (step ≈ ${step.toFixed(3)}°).`);
+
+  // RASX metadata strip: shown when meta was supplied, hidden otherwise.
+  const metaEl = document.getElementById('exp-meta');
+  const metaStr = formatRasxMeta(opts.meta);
+  if (metaStr) {
+    metaEl.textContent = metaStr;
+    metaEl.style.display = '';
+  } else {
+    metaEl.textContent = '';
+    metaEl.style.display = 'none';
+  }
   render();
 }
 function readFile(file) {
   const reader = new FileReader();
-  reader.onload = e => loadFromText(e.target.result, file.name);
+  reader.onload = async e => {
+    const buf = e.target.result;
+    // Magic-byte routing: ZIP local-file header (PK\x03\x04) → try RASX unpack.
+    // Falls through to text path if unpack rejects (generic ZIP, not SmartLab).
+    if (isZipMagic(buf)) {
+      try {
+        const { text, meta } = await unpackRasx(buf);
+        const stem = file.name.replace(/\.[^.]+$/, '');
+        const displayName =
+          (meta && meta.sampleName && meta.sampleName.trim()) ||
+          stem ||
+          'Experimental';
+        loadFromText(text, file.name, { meta, displayName });
+        return;
+      } catch (err) {
+        console.warn('[xrdoverlay] RASX unpack failed, falling back to text:', err.message);
+      }
+    }
+    // Text path (default): decode the buffer as UTF-8.
+    try {
+      const text = new TextDecoder('utf-8').decode(buf);
+      loadFromText(text, file.name);
+    } catch (err) {
+      showMsg('exp-msg', 'err', `Couldn't read ${file.name}: ${err.message}`);
+    }
+  };
   reader.onerror = () => showMsg('exp-msg', 'err',
     `Couldn't read ${file.name}.`);
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
 }
 
 // ============================================================
