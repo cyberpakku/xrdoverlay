@@ -16,7 +16,8 @@ Works offline after first load (PWA).
    - Supported formats: `.ASC`, `.txt`, `.xy`, `.csv` (auto-detects delimiter and skips the Rigaku error column), and `.rasx` (Rigaku SmartLab archive — unpacked in the browser; no other app needed).
    - Or click **Load demo** to see the tool work with a sample experimental file.
 4. Compare. Use the **2θ shift** slider to align peaks if your sample is uniformly offset.
-5. Optional: enable **Background subtraction**, switch **Y scale** to log, zoom into a 2θ range, or save a PNG.
+5. If the synthetic standard's peaks look much sharper than yours, widen them with the **Standard peak width (FWHM)** slider. Affects the synthetic standard only — your experimental data is untouched.
+6. Optional: enable **Background subtraction**, switch **Y scale** to log, zoom into a 2θ range, or save a PNG.
 
 On a phone, you can **Add to Home Screen** to install it as an app — it then works fully offline.
 
@@ -47,7 +48,7 @@ Options worth knowing:
 - `--wavelength 1.5406`  X-ray wavelength in Å (default: Cu Kα1). Use 1.5418 for the doublet-weighted average.
 - `--two-theta 5,90`     computed 2θ range.
 - `--step 0.02`          grid step.
-- `--fwhm 0.05`          Gaussian peak FWHM.
+- `--fwhm 0.15`          Gaussian peak FWHM baked into the CSV. The app's Peak-width slider can broaden it further at view time, but never narrower.
 - `--dry-run`            print what would change, write nothing.
 
 After the script finishes, it prints the exact `git add ... && git commit ... && git push` line — copy and run it to deploy.
@@ -91,7 +92,7 @@ files never leave your device.
 ## Notes
 
 - Cu Kα radiation is assumed throughout (d-spacing hover, default wavelength). If you measure with a different source, peak positions in the computed standards will not match your data and you'll need to add a separate standard at the right wavelength.
-- The synthetic standards use a single Gaussian peak profile with constant FWHM 0.05°. This is adequate for visual contaminant ID but not for Rietveld-quality work.
+- The synthetic standards use a single Gaussian peak profile with a baked-in FWHM of 0.15° (recorded per entry as `fwhm_baseline` in `manifest.json`). The Peak-width slider can broaden a standard at view time by adding a Gaussian in quadrature, but cannot sharpen below the baked-in value. Adequate for visual contaminant ID, not for Rietveld-quality work.
 - ModPoly background subtraction is the same algorithm used in the project's `coding/xrd_bgsub.py`.
 
 ---

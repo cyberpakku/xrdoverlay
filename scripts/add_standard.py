@@ -403,6 +403,7 @@ def main(argv=None) -> int:
         "display_label": display_label,
         "tags": list(args.tags),
         "wavelength": args.wavelength,
+        "fwhm_baseline": args.fwhm,
     }
     if peaks:
         entry["peaks"] = peaks

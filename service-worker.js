@@ -4,7 +4,7 @@
 // manifest.webmanifest, plotly.min.js, icons/*, or standards/*.csv.
 // add_standard.py auto-bumps this constant when standards change.
 
-const CACHE = 'xrdoverlay-v1.1.0';
+const CACHE = 'xrdoverlay-v1.2.0';
 const CORE = [
   './',
   './index.html',

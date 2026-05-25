@@ -256,6 +256,15 @@
       </div>
     </div>
 
+    <!-- Standard peak width (FWHM) — broadens the SYNTHETIC standard only -->
+    <div class="section">
+      <span class="section-label">Standard peak width (FWHM, °)</span>
+      <div class="row">
+        <input type="range" id="fwhm" min="0.15" max="1.00" step="0.01" value="0.15">
+        <input type="number" id="fwhm-num" min="0.15" max="1.00" step="0.01" value="0.15">
+      </div>
+    </div>
+
     <!-- Advanced -->
     <details class="section">
       <summary>Background subtraction</summary>
@@ -312,7 +321,7 @@
 
     <!-- Footer with status + cache reset -->
     <div class="footer">
-      <span id="version" title="xrdoverlay version">v1.1.0</span>
+      <span id="version" title="xrdoverlay version">v1.2.0</span>
       <div class="small-actions">
         <button id="theme-toggle" class="secondary" title="Toggle theme">🌙</button>
         <button id="clear-cache" class="secondary" title="Clear offline cache">↻ cache</button>
@@ -337,13 +346,15 @@
 // State
 // ============================================================
 const LAMBDA_CU_KA = 1.5406;
+const FWHM_TO_SIGMA = 2.3548;        // 2√(2 ln 2)
+const FWHM_BASE_FALLBACK = 0.15;     // pre-Phase-D manifests had no fwhm_baseline
 const PRESETS = {
   '10-30': [10, 30],
   '10-70': [10, 70],
   '20-80': [20, 80],
   'full':  [null, null],  // auto from data
 };
-const DEFAULTS = { shift: 0, bgOn: false, bgDeg: 6, yScale: 'linear', xmin: 10, xmax: 70 };
+const DEFAULTS = { shift: 0, fwhmTarget: 0.15, bgOn: false, bgDeg: 6, yScale: 'linear', xmin: 10, xmax: 70 };
 
 const state = {
   standards: [],           // manifest entries
@@ -351,6 +362,7 @@ const state = {
   stdData: null,           // { x: [], y: [] }
   expRaw: null,            // { x: [], y: [], filename }
   shift: 0,
+  fwhmTarget: 0.15,        // effective FWHM target (deg) on the synthetic standard
   bgOn: false, bgDeg: 6,
   yScale: 'linear',
   xmin: 10, xmax: 70,
@@ -583,6 +595,38 @@ function normalizeInRange(x, y, xmin, xmax) {
 }
 
 // ============================================================
+// Gaussian blur — broaden a curve already convolved with σ₀ by adding
+// σ_add in quadrature.  G(σ₁) ∗ G(σ₂) = G(√(σ₁²+σ₂²)).  PLAN.md §I.
+// sigmaPts is σ_add measured in grid points (degrees / dx).  Replicate-
+// edge padding; unit-sum kernel preserves integrated intensity.
+// ============================================================
+function gaussianBlur(y, sigmaPts) {
+  const n = y.length;
+  if (!n || sigmaPts < 0.3) return y.slice();
+  const H = Math.ceil(3 * sigmaPts);
+  const kernel = new Float64Array(2 * H + 1);
+  let ksum = 0;
+  for (let i = -H; i <= H; i++) {
+    const v = Math.exp(-(i * i) / (2 * sigmaPts * sigmaPts));
+    kernel[i + H] = v;
+    ksum += v;
+  }
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= ksum;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let k = -H; k <= H; k++) {
+      let j = i + k;
+      if (j < 0) j = 0;
+      else if (j >= n) j = n - 1;
+      s += y[j] * kernel[k + H];
+    }
+    out[i] = s;
+  }
+  return out;
+}
+
+// ============================================================
 // d-spacing helper for hover (Cu Kα 1.5406 Å assumed)
 // ============================================================
 function dSpacing(twoTheta) {
@@ -653,9 +697,21 @@ function render() {
   // --- Standard trace ---
   if (state.stdData) {
     const x = state.stdData.x;
-    let yN = normalizeInRange(x, state.stdData.y, state.xmin, state.xmax);
-    if (state.yScale === 'log') yN = yN.map(v => v > 0 ? v : null);
     const stdEntry = state.standards.find(s => s.compound === state.selected);
+    // Peak-width broadening (PLAN.md §I): add a Gaussian of σ_add in quadrature
+    // to reach state.fwhmTarget on top of the CSV's baked-in FWHM.
+    const baseline = (stdEntry && stdEntry.fwhm_baseline) || FWHM_BASE_FALLBACK;
+    const sigmaTarget = state.fwhmTarget / FWHM_TO_SIGMA;
+    const sigmaBase = baseline / FWHM_TO_SIGMA;
+    const sigmaAddSq = sigmaTarget * sigmaTarget - sigmaBase * sigmaBase;
+    let yBlurred = state.stdData.y;
+    if (sigmaAddSq > 0 && x.length > 1) {
+      const dx = x[1] - x[0];
+      const sigmaPts = Math.sqrt(sigmaAddSq) / dx;
+      yBlurred = gaussianBlur(state.stdData.y, sigmaPts);
+    }
+    let yN = normalizeInRange(x, yBlurred, state.xmin, state.xmax);
+    if (state.yScale === 'log') yN = yN.map(v => v > 0 ? v : null);
     const labelText = stdEntry ? stdEntry.display_label : state.selected;
     const hkls = buildHklLookup(x, stdEntry && stdEntry.peaks, 0.10);
     const cd = x.map((xv, i) => [dSpacing(xv), hkls[i]]);
@@ -912,6 +968,7 @@ function applyTheme(t) {
 // ============================================================
 function resetDefaults() {
   state.shift = DEFAULTS.shift;
+  state.fwhmTarget = DEFAULTS.fwhmTarget;
   state.bgOn = DEFAULTS.bgOn;
   state.bgDeg = DEFAULTS.bgDeg;
   state.yScale = DEFAULTS.yScale;
@@ -919,6 +976,8 @@ function resetDefaults() {
   state.xmax = DEFAULTS.xmax;
   document.getElementById('shift').value = DEFAULTS.shift;
   document.getElementById('shift-num').value = DEFAULTS.shift;
+  document.getElementById('fwhm').value = DEFAULTS.fwhmTarget;
+  document.getElementById('fwhm-num').value = DEFAULTS.fwhmTarget;
   document.getElementById('bg-on').checked = DEFAULTS.bgOn;
   document.getElementById('bg-deg').value = DEFAULTS.bgDeg;
   document.getElementById('bg-deg-val').textContent = DEFAULTS.bgDeg;
@@ -1017,6 +1076,27 @@ function wire() {
   }
   shift.addEventListener('input', e => applyShift(e.target.value));
   shiftNum.addEventListener('change', e => applyShift(e.target.value));
+
+  // Standard peak width (FWHM) — broadens the synthetic standard only
+  const fwhm = document.getElementById('fwhm');
+  const fwhmNum = document.getElementById('fwhm-num');
+  function applyFwhm(v) {
+    v = Math.max(0.15, Math.min(1.00, parseFloat(v) || 0.15));
+    v = Math.round(v * 100) / 100;
+    state.fwhmTarget = v;
+    fwhm.value = v;
+    fwhmNum.value = v;
+    render();
+    if (state.stdData) {
+      const entry = state.standards.find(s => s.compound === state.selected);
+      const baseline = (entry && entry.fwhm_baseline) || FWHM_BASE_FALLBACK;
+      const added = Math.sqrt(Math.max(0, v * v - baseline * baseline));
+      showMsg('exp-msg', 'info',
+        `Standard FWHM: ${v.toFixed(2)}° (synthetic baseline ${baseline.toFixed(2)}° + added ${added.toFixed(2)}°).`);
+    }
+  }
+  fwhm.addEventListener('input', e => applyFwhm(e.target.value));
+  fwhmNum.addEventListener('change', e => applyFwhm(e.target.value));
 
   // BG controls
   document.getElementById('bg-on').addEventListener('change', e => {

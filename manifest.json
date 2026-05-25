@@ -17,6 +17,7 @@
         "perovskite"
       ],
       "wavelength": 1.5406,
+      "fwhm_baseline": 0.15,
       "peaks": [
         {
           "2theta": 32.3673,
@@ -114,6 +115,7 @@
         "perovskite"
       ],
       "wavelength": 1.5406,
+      "fwhm_baseline": 0.15,
       "peaks": [
         {
           "2theta": 32.5107,
@@ -211,6 +213,7 @@
         "perovskite"
       ],
       "wavelength": 1.5406,
+      "fwhm_baseline": 0.15,
       "peaks": [
         {
           "2theta": 33.4878,
@@ -308,6 +311,7 @@
         "perovskite"
       ],
       "wavelength": 1.5406,
+      "fwhm_baseline": 0.15,
       "peaks": [
         {
           "2theta": 33.2991,
